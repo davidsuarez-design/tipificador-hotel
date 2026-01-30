@@ -154,7 +154,8 @@ with col2:
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
-                st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+                st.download_button("Descargar Excel Tipificado", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
 
 
