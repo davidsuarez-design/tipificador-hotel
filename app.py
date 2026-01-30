@@ -7,7 +7,6 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import io
-
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Tipificador Zuana", layout="wide")
 col_logo, col_titulo = st.columns([1, 4]) # Una columna pequeña y una grande
@@ -185,6 +184,7 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
 
 
