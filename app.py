@@ -9,9 +9,9 @@ from sklearn.metrics import accuracy_score
 import io
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Tipificador Multi-Etiqueta", layout="wide")
+st.set_page_config(page_title="Tipificador Zuana", layout="wide")
 
-st.title("🤖 Tipificador IA Avanzado (Multi-Temas)")
+st.title("🤖 Tipificador Encuestas Experiencia Hotel Zuana")
 st.markdown("""
 Esta versión detecta **múltiples temas** en un mismo comentario.
 Si la IA detecta que un cliente habla de varias cosas a la vez, duplicará la fila automáticamente.
@@ -178,3 +178,4 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
