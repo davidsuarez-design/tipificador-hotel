@@ -118,7 +118,7 @@ def predecir_multilabel(model, textos, umbral=0.3):
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.header("1. Entrenamiento")
+    st.header("1. Cargar Historico")
     archivo_entrenar = st.file_uploader("Sube Histórico", type=["csv", "xlsx"], key="train")
     if archivo_entrenar:
         df_train = cargar_archivo_inteligente(archivo_entrenar)
@@ -131,7 +131,7 @@ if 'modelos' in st.session_state:
     st.sidebar.success(f"Modelos Activos. Acc: {st.session_state['metricas']['Area']:.1%}")
 
 with col2:
-    st.header("2. Predicción Multi-Etiqueta")
+    st.header("2. Cargar Base a tipificar")
     archivo_predecir = st.file_uploader("Sube Nuevas Encuestas", type=["csv", "xlsx"], key="pred")
     
     # SLIDER DE SENSIBILIDAD
@@ -178,5 +178,6 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
 
