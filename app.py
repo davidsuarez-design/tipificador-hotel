@@ -2,175 +2,179 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
+from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import io
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Tipificador IA de Encuestas", layout="wide")
+st.set_page_config(page_title="Tipificador Multi-Etiqueta", layout="wide")
 
-st.title("🤖 Tipificador Automático de Encuestas")
+st.title("🤖 Tipificador IA Avanzado (Multi-Temas)")
 st.markdown("""
-Esta aplicación utiliza Inteligencia Artificial para clasificar comentarios de encuestas.
-**Pasos:**
-1. Carga tu **Histórico** (para que la IA aprenda).
-2. Carga tus **Nuevos Comentarios** (para tipificar).
+Esta versión detecta **múltiples temas** en un mismo comentario.
+Si la IA detecta que un cliente habla de varias cosas a la vez, duplicará la fila automáticamente.
 """)
 
 # --- FUNCIONES DE LIMPIEZA ---
 def limpiar_texto(df, col_comentario):
-    # Asegurar que sea string
     df['clean_text'] = df[col_comentario].astype(str).str.lower().str.strip()
-    
-    # Lista de comentarios "basura"
     stop_phrases = ['no', 'no.', 'ninguno', 'ninguna', 'sin comentarios', 'ok', 'na', 'no aplica', 'todo bien', 'gracias']
-    
-    # Filtros
     df_clean = df[~df['clean_text'].isin(stop_phrases)].copy()
     df_clean = df_clean[df_clean['clean_text'].str.len() > 3]
-    
     return df_clean
 
-# --- CARGA DE ARCHIVOS INTELIGENTE (Detecta separadores y nombres) ---
+# --- CARGA INTELIGENTE ---
 def cargar_archivo_inteligente(uploaded_file):
     try:
-        # 1. Leer según extensión
         if uploaded_file.name.endswith('.csv'):
             try:
-                # Intento A: Separador punto y coma (;), UTF-8
                 df = pd.read_csv(uploaded_file, sep=';', encoding='utf-8')
-                if len(df.columns) < 2: # Si falló la separación
-                    raise ValueError("Probando otro separador")
+                if len(df.columns) < 2: raise ValueError()
             except:
                 try:
-                    # Intento B: Separador coma (,), UTF-8
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, sep=',', encoding='utf-8')
                 except:
-                    # Intento C: Latin-1 (Excel viejo)
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, sep=';', encoding='latin-1')
         else:
-            # Excel (.xlsx)
             df = pd.read_excel(uploaded_file)
             
-        # 2. Normalizar Columnas (Quitar espacios extra: " Area " -> "Area")
         df.columns = df.columns.str.strip()
         
-        # 3. Buscar la columna 'Comentario' aunque esté mal escrita
-        # Si no existe 'Comentario', buscamos variantes comunes
+        # Buscar columna comentario
         if 'Comentario' not in df.columns:
-            posibles_nombres = [c for c in df.columns if 'comentario' in c.lower() or 'review' in c.lower()]
-            if posibles_nombres:
-                st.warning(f"⚠️ No encontré la columna 'Comentario', pero usaré '{posibles_nombres[0]}' que se le parece.")
-                df.rename(columns={posibles_nombres[0]: 'Comentario'}, inplace=True)
+            posibles = [c for c in df.columns if 'coment' in c.lower() or 'review' in c.lower()]
+            if posibles:
+                st.toast(f"Usando columna '{posibles[0]}' como Comentario")
+                df.rename(columns={posibles[0]: 'Comentario'}, inplace=True)
             else:
-                st.error(f"❌ Error: Tu archivo no tiene una columna llamada 'Comentario'. Columnas encontradas: {list(df.columns)}")
+                st.error("❌ No encontré la columna 'Comentario'.")
                 return None
-                
         return df
-
     except Exception as e:
-        st.error(f"Error crítico leyendo el archivo: {e}")
+        st.error(f"Error leyendo archivo: {e}")
         return None
 
-# --- ENTRENAMIENTO ---
+# --- ENTRENAMIENTO (LOGISTIC REGRESSION PARA PROBABILIDADES) ---
 @st.cache_resource
 def entrenar_modelos(df_train):
-    with st.spinner('Entrenando cerebro digital...'):
-        # Validar columnas necesarias
-        required_cols = ['Area', 'Tipo', 'Clasificación', 'Clasificación NPS']
-        missing = [c for c in required_cols if c not in df_train.columns]
-        if missing:
-            st.error(f"❌ El archivo histórico debe tener las columnas: {missing}")
+    with st.spinner('Entrenando cerebro con capacidad de probabilidades...'):
+        required = ['Area', 'Tipo', 'Clasificación', 'Clasificación NPS']
+        if not all(col in df_train.columns for col in required):
+            st.error(f"Faltan columnas. Requeridas: {required}")
             return None, None
 
         df = limpiar_texto(df_train, 'Comentario')
-        
-        # Variables Objetivo
-        targets = {
-            'Area': df['Area'],
-            'Tipo': df['Tipo'],
-            'Sentimiento': df['Clasificación'],
-            'NPS': df['Clasificación NPS']
-        }
+        targets = {'Area': df['Area'], 'Tipo': df['Tipo'], 'Sentimiento': df['Clasificación'], 'NPS': df['Clasificación NPS']}
         
         modelos = {}
         metricas = {}
 
         for nombre, y in targets.items():
+            # Usamos LogisticRegression para poder sacar porcentajes de probabilidad
             pipeline = Pipeline([
                 ('tfidf', TfidfVectorizer(max_features=5000, ngram_range=(1,2))), 
-                ('clf', LinearSVC(class_weight='balanced', random_state=42, max_iter=1000))
+                ('clf', LogisticRegression(class_weight='balanced', max_iter=1000, n_jobs=-1))
             ])
             
             X_train, X_test, y_train, y_test = train_test_split(df['clean_text'], y, test_size=0.2, random_state=42)
             pipeline.fit(X_train, y_train)
-            acc = accuracy_score(y_test, pipeline.predict(X_test))
-            
             modelos[nombre] = pipeline
-            metricas[nombre] = acc
+            metricas[nombre] = pipeline.score(X_test, y_test)
             
         return modelos, metricas
 
-# --- INTERFAZ ---
+# --- LÓGICA MULTI-ETIQUETA ---
+def predecir_multilabel(model, textos, umbral=0.3):
+    """
+    Devuelve una lista de tuplas (indice_original, etiqueta_predicha)
+    Si la probabilidad supera el umbral, se agrega.
+    """
+    probs = model.predict_proba(textos)
+    clases = model.classes_
+    resultados_expandidos = []
+    
+    for i, prob_row in enumerate(probs):
+        # Índices donde la probabilidad supera el umbral
+        indices_validos = np.where(prob_row >= umbral)[0]
+        
+        # Si ninguno supera el umbral, tomamos el mejor (fallback)
+        if len(indices_validos) == 0:
+            indices_validos = [np.argmax(prob_row)]
+            
+        for idx in indices_validos:
+            resultados_expandidos.append({
+                'indice_orig': i,
+                'Prediccion': clases[idx],
+                'Confianza': prob_row[idx]
+            })
+            
+    return pd.DataFrame(resultados_expandidos)
 
+# --- INTERFAZ ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.header("1. Entrenamiento")
-    archivo_entrenamiento = st.file_uploader("Sube tu CSV Histórico", type=["csv", "xlsx"], key="train")
-
-modelos = None
-
-if archivo_entrenamiento:
-    df_train = cargar_archivo_inteligente(archivo_entrenamiento)
-    
-    if df_train is not None:
-        st.success(f"Cargados {len(df_train)} registros. Columnas: {list(df_train.columns)}")
-        
-        if st.button("Entrenar Modelos"):
+    archivo_entrenar = st.file_uploader("Sube Histórico", type=["csv", "xlsx"], key="train")
+    if archivo_entrenar:
+        df_train = cargar_archivo_inteligente(archivo_entrenar)
+        if df_train is not None and st.button("Entrenar"):
             modelos, metricas = entrenar_modelos(df_train)
-            if modelos:
-                st.session_state['modelos'] = modelos
-                st.session_state['metricas'] = metricas
+            st.session_state['modelos'] = modelos
+            st.session_state['metricas'] = metricas
 
-# Mostrar métricas
 if 'modelos' in st.session_state:
-    modelos = st.session_state['modelos']
-    m = st.session_state['metricas']
-    st.info(f"✅ Modelos Listos. Precisión: NPS ({m['NPS']:.0%}), Área ({m['Area']:.0%})")
+    st.sidebar.success(f"Modelos Activos. Acc: {st.session_state['metricas']['Area']:.1%}")
 
 with col2:
-    st.header("2. Predicción")
-    archivo_nuevos = st.file_uploader("Sube nuevas encuestas", type=["csv", "xlsx"], key="predict")
+    st.header("2. Predicción Multi-Etiqueta")
+    archivo_predecir = st.file_uploader("Sube Nuevas Encuestas", type=["csv", "xlsx"], key="pred")
     
-    if archivo_nuevos and modelos:
-        df_new = cargar_archivo_inteligente(archivo_nuevos)
+    # SLIDER DE SENSIBILIDAD
+    umbral = st.slider("Sensibilidad de Duplicación (Umbral)", 0.1, 0.9, 0.30, 
+                       help="Si bajas esto, duplicará más filas (detectará más temas tenues). Si lo subes, solo duplicará lo muy obvio.")
+
+    if archivo_predecir and 'modelos' in st.session_state:
+        df_new = cargar_archivo_inteligente(archivo_predecir)
         
         if df_new is not None:
-            if st.button("Tipificar Ahora"):
-                df_proc = df_new.copy()
-                clean_txt = df_proc['Comentario'].astype(str).str.lower().str.strip()
+            if st.button("Tipificar y Expandir"):
+                # 1. Preparar texto
+                textos = df_new['Comentario'].astype(str).str.lower().str.strip()
                 
-                df_proc['Pred_Area'] = modelos['Area'].predict(clean_txt)
-                df_proc['Pred_Tipo'] = modelos['Tipo'].predict(clean_txt)
-                df_proc['Pred_Sentimiento'] = modelos['Sentimiento'].predict(clean_txt)
-                df_proc['Pred_NPS'] = modelos['NPS'].predict(clean_txt)
+                # 2. Predecir ÁREAS (Aquí ocurre la magia de la duplicación)
+                modelo_area = st.session_state['modelos']['Area']
+                df_areas_expandidas = predecir_multilabel(modelo_area, textos, umbral=umbral)
                 
-                st.write("Vista previa:")
-                st.dataframe(df_proc[['Comentario', 'Pred_Area', 'Pred_Tipo', 'Pred_NPS']].head())
+                # 3. Cruzar con la data original
+                # Hacemos un merge para traer el comentario original a las nuevas filas
+                df_final = df_areas_expandidas.merge(df_new, left_on='indice_orig', right_index=True)
+                df_final = df_final.rename(columns={'Prediccion': 'Pred_Area'})
+                
+                # 4. Predecir lo demás (Tipo, NPS) para cada fila nueva
+                # Nota: Para simplificar, aquí predecimos el "mejor" Tipo para ese texto.
+                # Idealmente el Tipo dependería del Area, pero el modelo general suele acertar por contexto.
+                textos_expandidos = df_final['Comentario'].astype(str).str.lower().str.strip()
+                
+                df_final['Pred_Tipo'] = st.session_state['modelos']['Tipo'].predict(textos_expandidos)
+                df_final['Pred_Sentimiento'] = st.session_state['modelos']['Sentimiento'].predict(textos_expandidos)
+                df_final['Pred_NPS'] = st.session_state['modelos']['NPS'].predict(textos_expandidos)
+                
+                # Ordenar y Limpiar
+                cols_orden = ['Comentario', 'Pred_Area', 'Pred_Tipo', 'Pred_Sentimiento', 'Pred_NPS', 'Confianza']
+                # Agregar columnas originales extra si existen
+                otras_cols = [c for c in df_final.columns if c not in cols_orden and c != 'indice_orig']
+                df_final = df_final[cols_orden + otras_cols]
+                
+                st.write(f"De {len(df_new)} comentarios originales, se generaron {len(df_final)} filas tipificadas.")
+                st.dataframe(df_final.head())
                 
                 # Descarga
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    df_proc.to_excel(writer, index=False)
-                    
-                st.download_button("Descargar Excel", buffer.getvalue(), "Encuestas_Tipificadas.xlsx", "application/vnd.ms-excel")
-    
-    elif archivo_nuevos and not modelos:
-        st.warning("⚠️ Primero entrena los modelos en el paso 1.")
-
-
+                    df_final.to_excel(writer, index=False)
+                st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
