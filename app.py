@@ -132,7 +132,7 @@ with col2:
         df_new = cargar_archivo_inteligente(archivo_predecir)
         
         if df_new is not None:
-            if st.button("Tipificar y Expandir"):
+            if st.button("Tipificar Comentarios"):
                 textos = df_new['Comentario'].astype(str).str.lower().str.strip()
                 modelo_area = st.session_state['modelos']['Area']
                 df_areas_expandidas = predecir_multilabel(modelo_area, textos, umbral=umbral)
@@ -154,7 +154,8 @@ with col2:
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
-                st.download_button("Descargar Excel Tipificado", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+                st.download_button("Descargar Excel Tipificado", buffer.getvalue(), "Tipificacion_Comentarios.xlsx")
+
 
 
 
