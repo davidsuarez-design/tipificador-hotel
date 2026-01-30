@@ -21,46 +21,75 @@ Esta aplicación utiliza Inteligencia Artificial para clasificar comentarios de 
 
 # --- FUNCIONES DE LIMPIEZA ---
 def limpiar_texto(df, col_comentario):
-    # Convertir a string y minúsculas
+    # Asegurar que sea string
     df['clean_text'] = df[col_comentario].astype(str).str.lower().str.strip()
     
-    # Lista de comentarios "basura" que no aportan valor
+    # Lista de comentarios "basura"
     stop_phrases = ['no', 'no.', 'ninguno', 'ninguna', 'sin comentarios', 'ok', 'na', 'no aplica', 'todo bien', 'gracias']
     
-    # Filtro 1: Eliminar frases exactas de la lista basura
+    # Filtros
     df_clean = df[~df['clean_text'].isin(stop_phrases)].copy()
-    
-    # Filtro 2: Eliminar comentarios muy cortos (menos de 4 letras)
     df_clean = df_clean[df_clean['clean_text'].str.len() > 3]
     
     return df_clean
 
-# --- FUNCIÓN AUXILIAR PARA LEER ARCHIVOS (CORRECCIÓN UTF-8/LATIN) ---
-def cargar_archivo_seguro(uploaded_file):
-    """Intenta leer el archivo con diferentes codificaciones para evitar errores."""
-    if uploaded_file.name.endswith('.csv'):
-        try:
-            # Intento 1: UTF-8 (Estándar moderno)
-            return pd.read_csv(uploaded_file, sep=';', encoding='utf-8')
-        except UnicodeDecodeError:
+# --- CARGA DE ARCHIVOS INTELIGENTE (Detecta separadores y nombres) ---
+def cargar_archivo_inteligente(uploaded_file):
+    try:
+        # 1. Leer según extensión
+        if uploaded_file.name.endswith('.csv'):
             try:
-                # Intento 2: Latin-1 (Excel en Español/Windows)
-                return pd.read_csv(uploaded_file, sep=';', encoding='latin-1')
+                # Intento A: Separador punto y coma (;), UTF-8
+                df = pd.read_csv(uploaded_file, sep=';', encoding='utf-8')
+                if len(df.columns) < 2: # Si falló la separación
+                    raise ValueError("Probando otro separador")
             except:
-                st.error("No se pudo leer el CSV. Verifica que esté separado por punto y coma (;)")
+                try:
+                    # Intento B: Separador coma (,), UTF-8
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, sep=',', encoding='utf-8')
+                except:
+                    # Intento C: Latin-1 (Excel viejo)
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, sep=';', encoding='latin-1')
+        else:
+            # Excel (.xlsx)
+            df = pd.read_excel(uploaded_file)
+            
+        # 2. Normalizar Columnas (Quitar espacios extra: " Area " -> "Area")
+        df.columns = df.columns.str.strip()
+        
+        # 3. Buscar la columna 'Comentario' aunque esté mal escrita
+        # Si no existe 'Comentario', buscamos variantes comunes
+        if 'Comentario' not in df.columns:
+            posibles_nombres = [c for c in df.columns if 'comentario' in c.lower() or 'review' in c.lower()]
+            if posibles_nombres:
+                st.warning(f"⚠️ No encontré la columna 'Comentario', pero usaré '{posibles_nombres[0]}' que se le parece.")
+                df.rename(columns={posibles_nombres[0]: 'Comentario'}, inplace=True)
+            else:
+                st.error(f"❌ Error: Tu archivo no tiene una columna llamada 'Comentario'. Columnas encontradas: {list(df.columns)}")
                 return None
-    else:
-        return pd.read_excel(uploaded_file)
+                
+        return df
 
-# --- ENTRENAMIENTO DEL MODELO ---
+    except Exception as e:
+        st.error(f"Error crítico leyendo el archivo: {e}")
+        return None
+
+# --- ENTRENAMIENTO ---
 @st.cache_resource
 def entrenar_modelos(df_train):
-    with st.spinner('Entrenando cerebro digital... esto puede tomar unos segundos.'):
-        # Limpieza inicial
+    with st.spinner('Entrenando cerebro digital...'):
+        # Validar columnas necesarias
+        required_cols = ['Area', 'Tipo', 'Clasificación', 'Clasificación NPS']
+        missing = [c for c in required_cols if c not in df_train.columns]
+        if missing:
+            st.error(f"❌ El archivo histórico debe tener las columnas: {missing}")
+            return None, None
+
         df = limpiar_texto(df_train, 'Comentario')
         
         # Variables Objetivo
-        X = df['clean_text']
         targets = {
             'Area': df['Area'],
             'Tipo': df['Tipo'],
@@ -71,17 +100,13 @@ def entrenar_modelos(df_train):
         modelos = {}
         metricas = {}
 
-        # Entrenamos un modelo independiente para cada columna objetivo
         for nombre, y in targets.items():
-            # Pipeline: Vectorización + Clasificador
             pipeline = Pipeline([
                 ('tfidf', TfidfVectorizer(max_features=5000, ngram_range=(1,2))), 
                 ('clf', LinearSVC(class_weight='balanced', random_state=42, max_iter=1000))
             ])
             
-            # Dividir para validar
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
+            X_train, X_test, y_train, y_test = train_test_split(df['clean_text'], y, test_size=0.2, random_state=42)
             pipeline.fit(X_train, y_train)
             acc = accuracy_score(y_test, pipeline.predict(X_test))
             
@@ -90,74 +115,62 @@ def entrenar_modelos(df_train):
             
         return modelos, metricas
 
-# --- INTERFAZ DE USUARIO ---
+# --- INTERFAZ ---
 
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.header("1. Entrenamiento")
-    archivo_entrenamiento = st.file_uploader("Sube tu CSV Histórico", type=["csv", "xlsx"])
+    archivo_entrenamiento = st.file_uploader("Sube tu CSV Histórico", type=["csv", "xlsx"], key="train")
 
 modelos = None
 
 if archivo_entrenamiento:
-    try:
-        df_train = cargar_archivo_seguro(archivo_entrenamiento)
-            
-        if df_train is not None:
-            st.success(f"Cargados {len(df_train)} registros históricos.")
-            
-            # Botón para iniciar entrenamiento
-            if st.button("Entrenar Modelos"):
-                modelos, metricas = entrenar_modelos(df_train)
-                st.session_state['modelos'] = modelos # Guardar en sesión
+    df_train = cargar_archivo_inteligente(archivo_entrenamiento)
+    
+    if df_train is not None:
+        st.success(f"Cargados {len(df_train)} registros. Columnas: {list(df_train.columns)}")
+        
+        if st.button("Entrenar Modelos"):
+            modelos, metricas = entrenar_modelos(df_train)
+            if modelos:
+                st.session_state['modelos'] = modelos
                 st.session_state['metricas'] = metricas
 
-    except Exception as e:
-        st.error(f"Error inesperado: {e}")
-
-# Mostrar métricas si ya existen
+# Mostrar métricas
 if 'modelos' in st.session_state:
     modelos = st.session_state['modelos']
-    st.info(f"✅ Modelos Listos. Precisión estimada: NPS ({st.session_state['metricas']['NPS']:.0%}), Área ({st.session_state['metricas']['Area']:.0%})")
+    m = st.session_state['metricas']
+    st.info(f"✅ Modelos Listos. Precisión: NPS ({m['NPS']:.0%}), Área ({m['Area']:.0%})")
 
 with col2:
-    st.header("2. Predicción (Nuevos Datos)")
-    archivo_nuevos = st.file_uploader("Sube el archivo SIN tipificar", type=["csv", "xlsx"])
+    st.header("2. Predicción")
+    archivo_nuevos = st.file_uploader("Sube nuevas encuestas", type=["csv", "xlsx"], key="predict")
     
     if archivo_nuevos and modelos:
-        df_new = cargar_archivo_seguro(archivo_nuevos)
-            
+        df_new = cargar_archivo_inteligente(archivo_nuevos)
+        
         if df_new is not None:
-            if 'Comentario' not in df_new.columns:
-                st.error("⚠️ El archivo debe tener una columna llamada 'Comentario' (escrito exactamente así).")
-            else:
-                # Predecir
-                if st.button("Tipificar Ahora"):
-                    df_procesado = df_new.copy()
+            if st.button("Tipificar Ahora"):
+                df_proc = df_new.copy()
+                clean_txt = df_proc['Comentario'].astype(str).str.lower().str.strip()
+                
+                df_proc['Pred_Area'] = modelos['Area'].predict(clean_txt)
+                df_proc['Pred_Tipo'] = modelos['Tipo'].predict(clean_txt)
+                df_proc['Pred_Sentimiento'] = modelos['Sentimiento'].predict(clean_txt)
+                df_proc['Pred_NPS'] = modelos['NPS'].predict(clean_txt)
+                
+                st.write("Vista previa:")
+                st.dataframe(df_proc[['Comentario', 'Pred_Area', 'Pred_Tipo', 'Pred_NPS']].head())
+                
+                # Descarga
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    df_proc.to_excel(writer, index=False)
                     
-                    # Limpiamos solo para la predicción
-                    textos_limpios = df_procesado['Comentario'].astype(str).str.lower().str.strip()
-                    
-                    # Aplicar predicciones
-                    df_procesado['Pred_Area'] = modelos['Area'].predict(textos_limpios)
-                    df_procesado['Pred_Tipo'] = modelos['Tipo'].predict(textos_limpios)
-                    df_procesado['Pred_Sentimiento'] = modelos['Sentimiento'].predict(textos_limpios)
-                    df_procesado['Pred_NPS'] = modelos['NPS'].predict(textos_limpios)
-                    
-                    st.dataframe(df_procesado.head())
-                    
-                    # Botón de Descarga
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                        df_procesado.to_excel(writer, index=False)
-                        
-                    st.download_button(
-                        label="Descargar Excel Tipificado",
-                        data=buffer.getvalue(),
-                        file_name="Encuestas_Tipificadas_IA.xlsx",
-                        mime="application/vnd.ms-excel"
-                    )
+                st.download_button("Descargar Excel", buffer.getvalue(), "Encuestas_Tipificadas.xlsx", "application/vnd.ms-excel")
+    
     elif archivo_nuevos and not modelos:
-        st.warning("⚠️ Primero debes cargar el histórico y dar clic en 'Entrenar Modelos'.")
+        st.warning("⚠️ Primero entrena los modelos en el paso 1.")
+
 
