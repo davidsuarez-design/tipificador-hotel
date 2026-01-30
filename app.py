@@ -86,7 +86,12 @@ modelos = None
 if archivo_entrenamiento:
     try:
         if archivo_entrenamiento.name.endswith('.csv'):
-            df_train = pd.read_csv(archivo_entrenamiento, sep=';') # Ojo con el separador
+            try:
+                # Intento 1: Leer como UTF-8 (Estándar moderno)
+                df_train = pd.read_csv(archivo_entrenamiento, sep=';', encoding='utf-8')
+            except UnicodeDecodeError:
+                # Intento 2: Leer como Latin-1 (Excel en Español/Windows)
+                df_train = pd.read_csv(archivo_entrenamiento, sep=';', encoding='latin-1')
         else:
             df_train = pd.read_excel(archivo_entrenamiento)
             
@@ -111,8 +116,11 @@ with col2:
     archivo_nuevos = st.file_uploader("Sube el archivo SIN tipificar", type=["csv", "xlsx"])
     
     if archivo_nuevos and modelos:
-        if archivo_nuevos.name.endswith('.csv'):
-            df_new = pd.read_csv(archivo_nuevos, sep=';')
+       if archivo_nuevos.name.endswith('.csv'):
+            try:
+                df_new = pd.read_csv(archivo_nuevos, sep=';', encoding='utf-8')
+            except UnicodeDecodeError:
+                df_new = pd.read_csv(archivo_nuevos, sep=';', encoding='latin-1')
         else:
             df_new = pd.read_excel(archivo_nuevos)
             
@@ -146,4 +154,5 @@ with col2:
                     mime="application/vnd.ms-excel"
                 )
     elif archivo_nuevos and not modelos:
+
         st.warning("⚠️ Primero debes cargar el histórico y dar clic en 'Entrenar Modelos'.")
