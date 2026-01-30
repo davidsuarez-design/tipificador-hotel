@@ -13,8 +13,8 @@ st.set_page_config(page_title="Tipificador Zuana", layout="wide")
 
 st.title("🤖 Tipificador Encuestas Experiencia Hotel Zuana")
 st.markdown("""
-Esta versión detecta **múltiples temas** en un mismo comentario.
-Si la IA detecta que un cliente habla de varias cosas a la vez, duplicará la fila automáticamente.
+Este modelo interpretativo tiene como objetivo **evaluar** comentarios realizados por Huespedes del hotel Zuana.
+Se aclara que si la IA detecta que un cliente habla de varias cosas a la vez, duplicará la fila automáticamente.
 """)
 
 # --- FUNCIONES DE LIMPIEZA ---
@@ -178,4 +178,5 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
