@@ -16,7 +16,7 @@ col_logo, col_titulo = st.columns([1, 4]) # Una columna pequeña y una grande
 
 with col_logo:
     # Asegúrate de que el nombre del archivo coincida EXACTAMENTE con el que subiste
-    st.image("logo.png", width=150) 
+    st.image("Logo.png", width=150) 
 
 with col_titulo:
     st.title("Sistema de Inteligencia Artificial")
@@ -189,6 +189,7 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
 
 
