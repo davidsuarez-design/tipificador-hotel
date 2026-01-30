@@ -14,7 +14,7 @@ with col_logo:
     st.image("Logo.png", width=150) 
 
 with col_titulo:
-    st.title("🏨 Tipificador Encuestas Experiencia Hotel Zuana 🏨")
+    st.title("Tipificador Encuestas Experiencia Hotel Zuana 🏨")
     st.subheader("Análisis de Comentarios")
 st.markdown("""
 Este modelo interpretativo tiene como objetivo **evaluar** comentarios realizados por Huespedes del hotel Zuana.
@@ -155,6 +155,7 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
 
 
