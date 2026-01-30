@@ -10,8 +10,6 @@ import io
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Tipificador Zuana", layout="wide")
-
-# --- ENCABEZADO CON LOGO ---
 col_logo, col_titulo = st.columns([1, 4]) # Una columna pequeña y una grande
 
 with col_logo:
@@ -187,6 +185,7 @@ with col2:
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                     df_final.to_excel(writer, index=False)
                 st.download_button("Descargar Excel Multi-Etiqueta", buffer.getvalue(), "Tipificacion_Expandida.xlsx")
+
 
 
 
