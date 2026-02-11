@@ -2,31 +2,59 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from sklearn.svm import LinearSVC
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import io
-st.set_page_config(page_title="Tipificador Zuana", layout="wide")
+
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Tipificador IA Hotelero", layout="wide")
+
+# --- ENCABEZADO ---
 col_logo, col_titulo = st.columns([1, 4])
-
-with col_logo:
-    st.image("Logo.png", width=150) 
-
 with col_titulo:
-    st.title("🏨 Tipificador Encuestas Experiencia Hotel Zuana 🏨")
-    st.subheader("Análisis de Comentarios")
-st.markdown("""
-Este modelo interpretativo tiene como objetivo **evaluar** comentarios realizados por Huespedes del hotel Zuana.
-Se aclara que si la IA detecta que un cliente habla de varias cosas a la vez, duplicará la fila automáticamente.
-""")
+    st.title("Sistema de Inteligencia Artificial")
+    st.subheader("Tipificación Automática (Separa por guiones '-')")
 
-def limpiar_texto(df, col_comentario):
-    df['clean_text'] = df[col_comentario].astype(str).str.lower().str.strip()
-    stop_phrases = ['no', 'no.', 'ninguno', 'ninguna', 'sin comentarios', 'ok', 'na', 'no aplica', 'todo bien', 'gracias']
-    df_clean = df[~df['clean_text'].isin(stop_phrases)].copy()
-    df_clean = df_clean[df_clean['clean_text'].str.len() > 3]
-    return df_clean
+# --- FUNCIONES DE LIMPIEZA Y PREPARACIÓN ---
+def limpiar_texto_simple(texto):
+    """Limpia espacios y minúsculas básicas"""
+    if pd.isna(texto): return ""
+    return str(texto).lower().strip()
+
+def procesar_separacion_guiones(df, col_comentario):
+    """
+    1. Separa los comentarios por el guion '-'
+    2. Crea nuevas filas (Explode)
+    3. Filtra fragmentos vacíos o sin palabras reales
+    """
+    # Crear copia para no afectar el original inmediatamente
+    df_exp = df.copy()
+    
+    # Asegurar que sea string
+    df_exp[col_comentario] = df_exp[col_comentario].astype(str)
+    
+    # 1. SEPARAR: Convertir "Hola - Mundo" en ["Hola ", " Mundo"]
+    df_exp[col_comentario] = df_exp[col_comentario].str.split('-')
+    
+    # 2. EXPLOTAR: Crear una fila por cada elemento de la lista
+    df_exp = df_exp.explode(col_comentario)
+    
+    # 3. LIMPIEZA PROFUNDA DE FRAGMENTOS
+    # Quitar espacios al inicio y final de cada fragmento
+    df_exp[col_comentario] = df_exp[col_comentario].str.strip()
+    
+    # Filtrar: Solo nos quedamos con fragmentos que tengan al menos 2 letras
+    # Esto elimina automáticamente los "--" (que se vuelven vacíos) o los "- -"
+    df_exp = df_exp[df_exp[col_comentario].str.len() > 1]
+    
+    # Resetear el índice para mantener orden limpio
+    df_exp.reset_index(drop=True, inplace=True)
+    
+    return df_exp
+
+# --- CARGA INTELIGENTE ---
 def cargar_archivo_inteligente(uploaded_file):
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -44,6 +72,8 @@ def cargar_archivo_inteligente(uploaded_file):
             df = pd.read_excel(uploaded_file)
             
         df.columns = df.columns.str.strip()
+        
+        # Normalizar nombre de columna Comentario
         if 'Comentario' not in df.columns:
             posibles = [c for c in df.columns if 'coment' in c.lower() or 'review' in c.lower()]
             if posibles:
@@ -57,105 +87,109 @@ def cargar_archivo_inteligente(uploaded_file):
         st.error(f"Error leyendo archivo: {e}")
         return None
 
+# --- ENTRENAMIENTO (LINEAR SVC - CEREBRO RÁPIDO) ---
 @st.cache_resource
 def entrenar_modelos(df_train):
-    with st.spinner('Entrenando cerebro con capacidad de probabilidades...'):
-        required = ['Area', 'Tipo', 'Clasificación', 'Clasificación NPS']
-        if not all(col in df_train.columns for col in required):
-            st.error(f"Faltan columnas. Requeridas: {required}")
-            return None, None
+    with st.spinner('Entrenando cerebro digital...'):
+        # Limpieza básica para entrenamiento
+        df = df_train.copy()
+        df['clean_text'] = df['Comentario'].apply(limpiar_texto_simple)
+        
+        # Filtro de basura para entrenamiento
+        stop_phrases = ['no', 'no.', 'ninguno', 'ninguna', 'sin comentarios', 'ok', 'na', 'no aplica']
+        df = df[~df['clean_text'].isin(stop_phrases)]
+        df = df[df['clean_text'].str.len() > 3]
 
-        df = limpiar_texto(df_train, 'Comentario')
-        targets = {'Area': df['Area'], 'Tipo': df['Tipo'], 'Sentimiento': df['Clasificación'], 'NPS': df['Clasificación NPS']}
+        targets = {
+            'Area': df['Area'], 
+            'Tipo': df['Tipo'], 
+            'Sentimiento': df['Clasificación'], 
+            'NPS': df['Clasificación NPS']
+        }
         
         modelos = {}
         metricas = {}
 
         for nombre, y in targets.items():
+            # Pipeline Robusto
             pipeline = Pipeline([
                 ('tfidf', TfidfVectorizer(max_features=5000, ngram_range=(1,2))), 
-                ('clf', LogisticRegression(class_weight='balanced', max_iter=1000, n_jobs=-1))
+                ('clf', LinearSVC(class_weight='balanced', random_state=42, max_iter=1000))
             ])
             
             X_train, X_test, y_train, y_test = train_test_split(df['clean_text'], y, test_size=0.2, random_state=42)
             pipeline.fit(X_train, y_train)
+            acc = accuracy_score(y_test, pipeline.predict(X_test))
+            
             modelos[nombre] = pipeline
-            metricas[nombre] = pipeline.score(X_test, y_test)
+            metricas[nombre] = acc
             
         return modelos, metricas
-def predecir_multilabel(model, textos, umbral=0.3):
-    """
-    Devuelve una lista de tuplas (indice_original, etiqueta_predicha)
-    Si la probabilidad supera el umbral, se agrega.
-    """
-    probs = model.predict_proba(textos)
-    clases = model.classes_
-    resultados_expandidos = []
-    
-    for i, prob_row in enumerate(probs):
-        indices_validos = np.where(prob_row >= umbral)[0]
-        
-        if len(indices_validos) == 0:
-            indices_validos = [np.argmax(prob_row)]
-            
-        for idx in indices_validos:
-            resultados_expandidos.append({
-                'indice_orig': i,
-                'Prediccion': clases[idx],
-                'Confianza': prob_row[idx]
-            })
-            
-    return pd.DataFrame(resultados_expandidos)
-col1, col2 = st.columns([1, 2])
 
-with col1:
-    st.header("1. Cargar Historico 📉")
-    archivo_entrenar = st.file_uploader("Sube Histórico", type=["csv", "xlsx"], key="train")
+# --- INTERFAZ ---
+
+# BARRA LATERAL (Entrenamiento)
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    archivo_entrenar = st.file_uploader("1. Sube Histórico (Entrenamiento)", type=["csv", "xlsx"], key="train")
+    
     if archivo_entrenar:
         df_train = cargar_archivo_inteligente(archivo_entrenar)
-        if df_train is not None and st.button("Entrenar"):
-            modelos, metricas = entrenar_modelos(df_train)
-            st.session_state['modelos'] = modelos
-            st.session_state['metricas'] = metricas
+        if df_train is not None:
+            if st.button("Entrenar Modelo 🧠"):
+                modelos, metricas = entrenar_modelos(df_train)
+                st.session_state['modelos'] = modelos
+                st.session_state['metricas'] = metricas
+                st.success("¡Modelo Entrenado!")
 
-if 'modelos' in st.session_state:
-    st.sidebar.success(f"Modelos Activos. Acc: {st.session_state['metricas']['Area']:.1%}")
+    if 'metricas' in st.session_state:
+        st.divider()
+        st.caption("Precisión del Modelo:")
+        st.progress(st.session_state['metricas']['Area'], text=f"Áreas: {st.session_state['metricas']['Area']:.0%}")
+        st.progress(st.session_state['metricas']['NPS'], text=f"NPS: {st.session_state['metricas']['NPS']:.0%}")
 
-with col2:
-    st.header("2. Cargar Base a tipificar 📉")
-    archivo_predecir = st.file_uploader("Sube Nuevas Encuestas", type=["csv", "xlsx"], key="pred")
+# PANTALLA PRINCIPAL (Predicción)
+st.write("Sube el archivo de encuestas. Si un comentario tiene guiones (`-`), se separará en varias filas.")
 
-    umbral = st.slider("Sensibilidad de Duplicación (Umbral)", 0.1, 0.9, 0.30, 
-                       help="Si bajas esto, duplicará más filas (detectará más temas tenues). Si lo subes, solo duplicará lo muy obvio.")
+archivo_predecir = st.file_uploader("2. Sube Nuevas Encuestas", type=["csv", "xlsx"], key="pred")
 
-    if archivo_predecir and 'modelos' in st.session_state:
-        df_new = cargar_archivo_inteligente(archivo_predecir)
-        
-        if df_new is not None:
-            if st.button("Tipificar Comentarios"):
-                textos = df_new['Comentario'].astype(str).str.lower().str.strip()
-                modelo_area = st.session_state['modelos']['Area']
-                df_areas_expandidas = predecir_multilabel(modelo_area, textos, umbral=umbral)
-                df_final = df_areas_expandidas.merge(df_new, left_on='indice_orig', right_index=True)
-                df_final = df_final.rename(columns={'Prediccion': 'Pred_Area'})
-                textos_expandidos = df_final['Comentario'].astype(str).str.lower().str.strip()
-                
-                df_final['Pred_Tipo'] = st.session_state['modelos']['Tipo'].predict(textos_expandidos)
-                df_final['Pred_Sentimiento'] = st.session_state['modelos']['Sentimiento'].predict(textos_expandidos)
-                df_final['Pred_NPS'] = st.session_state['modelos']['NPS'].predict(textos_expandidos)
-                
-                cols_orden = ['Comentario', 'Pred_Area', 'Pred_Tipo', 'Pred_Sentimiento', 'Pred_NPS', 'Confianza']
-                otras_cols = [c for c in df_final.columns if c not in cols_orden and c != 'indice_orig']
-                df_final = df_final[cols_orden + otras_cols]
-                
-                st.write(f"De {len(df_new)} comentarios originales, se generaron {len(df_final)} filas tipificadas.")
-                st.dataframe(df_final.head())
-                
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    df_final.to_excel(writer, index=False)
-                st.download_button("Descargar Excel Tipificado", buffer.getvalue(), "Tipificacion_Comentarios.xlsx")
+if archivo_predecir and 'modelos' in st.session_state:
+    df_new = cargar_archivo_inteligente(archivo_predecir)
+    
+    if df_new is not None:
+        if st.button("Procesar y Tipificar 🚀"):
+            # 1. SEPARACIÓN POR GUIONES (Aquí ocurre la magia)
+            st.info(f"Filas originales: {len(df_new)}")
+            df_expandido = procesar_separacion_guiones(df_new, 'Comentario')
+            st.info(f"Filas después de separar por guiones (-): {len(df_expandido)}")
+            
+            # 2. PREPARAR TEXTO
+            textos_limpios = df_expandido['Comentario'].apply(limpiar_texto_simple)
+            
+            # 3. PREDECIR
+            modelos = st.session_state['modelos']
+            df_expandido['Pred_Area'] = modelos['Area'].predict(textos_limpios)
+            df_expandido['Pred_Tipo'] = modelos['Tipo'].predict(textos_limpios)
+            df_expandido['Pred_Sentimiento'] = modelos['Sentimiento'].predict(textos_limpios)
+            df_expandido['Pred_NPS'] = modelos['NPS'].predict(textos_limpios)
+            
+            # 4. MOSTRAR RESULTADOS
+            st.dataframe(df_expandido.head(10))
+            
+            # 5. DESCARGAR
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df_expandido.to_excel(writer, index=False)
+            
+            st.download_button(
+                label="Descargar Excel Final", 
+                data=buffer.getvalue(), 
+                file_name="Tipificacion_Separada.xlsx",
+                mime="application/vnd.ms-excel"
+            )
 
+elif archivo_predecir and 'modelos' not in st.session_state:
+    st.warning("⚠️ Recuerda entrenar el modelo primero en el menú de la izquierda.")
 
 
 
