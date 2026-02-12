@@ -8,20 +8,31 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import io
 import spacy
+import subprocess
+import sys
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Tipificador IA Hotelero", layout="wide")
 
-# --- CARGAR MODELO DE LENGUAJE ---
+# --- CARGAR MODELO DE LENGUAJE (ESTRATEGIA ANTI-BLOQUEO) ---
 @st.cache_resource
-def cargar_detector_nombres():
-    # Carga el modelo instalado desde requirements.txt
+def cargar_modelo_spacy():
     try:
+        # Intenta cargar primero
         return spacy.load("es_core_news_sm")
-    except:
-        return None
+    except OSError:
+        # Si falla, fuerza la descarga desde dentro del código
+        st.warning("Descargando modelo de lenguaje... esto tardará unos segundos.")
+        subprocess.run([sys.executable, "-m", "spacy", "download", "es_core_news_sm"])
+        return spacy.load("es_core_news_sm")
 
-nlp = cargar_detector_nombres()
+# Inicializar modelo
+nlp = None
+try:
+    with st.spinner('Iniciando motor de lenguaje...'):
+        nlp = cargar_modelo_spacy()
+except Exception as e:
+    st.error(f"Error iniciando NLP: {e}")
 
 # --- ENCABEZADO ---
 col_logo, col_titulo = st.columns([1, 4])
@@ -35,33 +46,36 @@ def limpiar_texto_simple(texto):
     return str(texto).lower().strip()
 
 def procesar_separacion_guiones(df, col_comentario):
-    """Separa comentarios unidos por guiones '-'"""
     df_exp = df.copy()
     df_exp[col_comentario] = df_exp[col_comentario].astype(str)
     
-    # Separar por guion y crear nuevas filas
+    # Separar por guiones
     df_exp[col_comentario] = df_exp[col_comentario].str.split('-')
     df_exp = df_exp.explode(col_comentario)
     
     # Limpiar
     df_exp[col_comentario] = df_exp[col_comentario].str.strip()
-    df_exp = df_exp[df_exp[col_comentario].str.len() > 1] # Eliminar vacíos
+    df_exp = df_exp[df_exp[col_comentario].str.len() > 1]
     
     df_exp.reset_index(drop=True, inplace=True)
     return df_exp
 
 def verificar_nombres(texto):
     """Detecta nombres de personas (PER)"""
-    if nlp is None: return "Error Modelo"
+    if nlp is None: return "Error"
     if pd.isna(texto) or texto == "": return "No validar"
     
-    doc = nlp(str(texto))
-    for entidad in doc.ents:
-        if entidad.label_ == "PER":
-            return "Validar"
+    try:
+        # Usamos el texto original para respetar mayúsculas
+        doc = nlp(str(texto))
+        for entidad in doc.ents:
+            if entidad.label_ == "PER":
+                return "Validar"
+    except:
+        pass
     return "No validar"
 
-# --- CARGA INTELIGENTE ---
+# --- CARGA ---
 def cargar_archivo_inteligente(uploaded_file):
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -80,7 +94,6 @@ def cargar_archivo_inteligente(uploaded_file):
             
         df.columns = df.columns.str.strip()
         
-        # Buscar columna comentario
         if 'Comentario' not in df.columns:
             posibles = [c for c in df.columns if 'coment' in c.lower() or 'review' in c.lower()]
             if posibles:
@@ -140,14 +153,14 @@ with st.sidebar:
                 modelos, metricas = entrenar_modelos(df_train)
                 st.session_state['modelos'] = modelos
                 st.session_state['metricas'] = metricas
-                st.success("¡Modelo Entrenado!")
+                st.success("¡Modelos Listos!")
 
     if 'metricas' in st.session_state:
         st.divider()
-        st.caption("Precisión:")
+        st.caption("Precisión estimada:")
         st.progress(st.session_state['metricas']['Area'], text=f"Área: {st.session_state['metricas']['Area']:.0%}")
 
-st.write("Sube el archivo. Se separará por guiones (`-`) y se validarán nombres.")
+st.write("Sube el archivo. Se separará por guiones (`-`) y validará nombres automáticamente.")
 
 archivo_predecir = st.file_uploader("2. Sube Nuevas Encuestas", type=["csv", "xlsx"], key="pred")
 
@@ -160,7 +173,7 @@ if archivo_predecir and 'modelos' in st.session_state:
             
             # 1. Separar
             df_exp = procesar_separacion_guiones(df_new, 'Comentario')
-            st.info(f"Filas tras separar guiones: {len(df_exp)}")
+            st.info(f"Filas tras separar: {len(df_exp)}")
             
             # 2. Predecir
             txt = df_exp['Comentario'].apply(limpiar_texto_simple)
@@ -170,8 +183,8 @@ if archivo_predecir and 'modelos' in st.session_state:
             df_exp['Pred_Tipo'] = modelos['Tipo'].predict(txt)
             df_exp['Pred_Sentimiento'] = modelos['Sentimiento'].predict(txt)
             
-            # 3. Detectar Nombres
-            with st.spinner('Buscando nombres...'):
+            # 3. Nombres (NER)
+            with st.spinner('Analizando nombres...'):
                 df_exp['Validación_Nombre'] = df_exp['Comentario'].apply(verificar_nombres)
             
             # 4. Resultado
@@ -184,5 +197,4 @@ if archivo_predecir and 'modelos' in st.session_state:
             st.download_button("Descargar Excel", buffer.getvalue(), "Tipificacion_Final.xlsx", "application/vnd.ms-excel")
 
 elif archivo_predecir and 'modelos' not in st.session_state:
-    st.warning("⚠️ Entrena el modelo primero.")
-
+    st.warning("⚠️ Entrena el modelo primero en el menú lateral.")
