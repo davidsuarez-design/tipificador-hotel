@@ -7,63 +7,74 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import io
-import spacy
+import re
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Tipificador Hotelero", layout="wide")
-
-# --- CARGA DEL MODELO (ESTABLE) ---
-@st.cache_resource
-def cargar_cerebro():
-    # Como ya lo pusimos en requirements.txt, esto cargará al instante
-    return spacy.load("es_core_news_sm")
-
-nlp = cargar_cerebro()
 
 # --- ENCABEZADO ---
 col_logo, col_titulo = st.columns([1, 4])
 with col_titulo:
     st.title("Sistema de Inteligencia Artificial")
-    st.success("✅ Sistema Operativo: Tipificación + Detección de Nombres Activos")
+    st.success("✅ Sistema Ultra-Ligero Activo (Sin riesgos de bloqueo)")
 
-# --- FUNCIONES ---
+# --- FUNCIONES DE LÓGICA ---
+
 def limpiar_texto_simple(texto):
     if pd.isna(texto): return ""
     return str(texto).lower().strip()
 
 def procesar_separacion_guiones(df, col_comentario):
-    """Separa comentarios unidos por guiones '-'"""
     df_exp = df.copy()
     df_exp[col_comentario] = df_exp[col_comentario].astype(str)
     
-    # 1. Separar por guiones
+    # Separar por guiones (-)
     df_exp[col_comentario] = df_exp[col_comentario].str.split('-')
-    
-    # 2. Crear nuevas filas
     df_exp = df_exp.explode(col_comentario)
     
-    # 3. Limpiar
+    # Limpiar
     df_exp[col_comentario] = df_exp[col_comentario].str.strip()
-    # Filtro: debe tener al menos 2 letras para no dejar filas vacías
     df_exp = df_exp[df_exp[col_comentario].str.len() > 1]
     
     df_exp.reset_index(drop=True, inplace=True)
     return df_exp
 
-def verificar_nombres(texto):
-    """Detecta nombres de personas (PER)"""
+def verificar_nombres_logica(texto):
+    """
+    Detecta nombres PROPIOS usando lógica gramatical:
+    - Busca palabras que empiecen con Mayúscula.
+    - Ignora la primera palabra de la frase (porque siempre lleva mayúscula).
+    - Ignora palabras comunes (Hotel, Habitación, Piscina, etc).
+    """
     if pd.isna(texto) or texto == "": return "No validar"
+    texto_str = str(texto).strip()
     
-    # Usamos el texto original (con mayúsculas) para mejor detección
-    doc = nlp(str(texto))
+    # Lista de palabras prohibidas (comunes en hoteles que llevan mayúscula a veces)
+    palabras_comunes = [
+        "Hotel", "Habitacion", "Habitación", "Piscina", "Restaurante", "Lobby", "Recepción", "Recepcion",
+        "Playa", "Bar", "Baño", "Cama", "Aire", "Wifi", "Internet", "Toallas", "Sábanas", "Desayuno",
+        "Almuerzo", "Cena", "Buffet", "Check-in", "Check-out", "Todo", "Nada", "Siempre", "Nunca",
+        "Excelente", "Bueno", "Malo", "Pesimo", "Regular", "Gracias", "Hola", "Adios"
+    ]
     
-    for entidad in doc.ents:
-        if entidad.label_ == "PER":
-            return "Validar"
-            
+    palabras = texto_str.split()
+    
+    for i, palabra in enumerate(palabras):
+        # Limpiar puntuación (quitar comas o puntos pegados)
+        palabra_limpia = re.sub(r'[^\w\s]', '', palabra)
+        
+        # Reglas para ser considerado un Nombre de Persona:
+        # 1. No ser la primera palabra de la frase (i > 0)
+        # 2. Empezar con Mayúscula
+        # 3. Tener más de 2 letras
+        # 4. No estar en la lista de palabras comunes
+        if i > 0 and len(palabra_limpia) > 2:
+            if palabra_limpia[0].isupper() and palabra_limpia not in palabras_comunes:
+                return "Validar" # Encontró un posible nombre (Ej: Ruben, Ignacio)
+                
     return "No validar"
 
-# --- CARGA INTELIGENTE ---
+# --- CARGA ---
 def cargar_archivo_inteligente(uploaded_file):
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -82,7 +93,6 @@ def cargar_archivo_inteligente(uploaded_file):
             
         df.columns = df.columns.str.strip()
         
-        # Buscar columna comentario
         if 'Comentario' not in df.columns:
             posibles = [c for c in df.columns if 'coment' in c.lower() or 'review' in c.lower()]
             if posibles:
@@ -102,7 +112,6 @@ def entrenar_modelos(df_train):
         df = df_train.copy()
         df['clean_text'] = df['Comentario'].apply(limpiar_texto_simple)
         
-        # Filtros de basura
         stop_phrases = ['no', 'no.', 'ninguno', 'ninguna', 'sin comentarios', 'ok', 'na', 'no aplica']
         df = df[~df['clean_text'].isin(stop_phrases)]
         df = df[df['clean_text'].str.len() > 3]
@@ -131,7 +140,7 @@ def entrenar_modelos(df_train):
             
         return modelos, metricas
 
-# --- INTERFAZ DE USUARIO ---
+# --- INTERFAZ ---
 with st.sidebar:
     st.header("⚙️ Configuración")
     archivo_entrenar = st.file_uploader("1. Sube Histórico", type=["csv", "xlsx"], key="train")
@@ -143,14 +152,14 @@ with st.sidebar:
                 modelos, metricas = entrenar_modelos(df_train)
                 st.session_state['modelos'] = modelos
                 st.session_state['metricas'] = metricas
-                st.success("¡Modelos Listos!")
+                st.success("¡Entrenado!")
 
     if 'metricas' in st.session_state:
         st.divider()
         st.caption("Precisión:")
         st.progress(st.session_state['metricas']['Area'], text=f"Área: {st.session_state['metricas']['Area']:.0%}")
 
-st.write("Sube el archivo. El sistema separará por guiones (`-`) y detectará nombres.")
+st.write("Sube el archivo. El sistema separará por guiones (`-`) y buscará nombres (Ej: Ruben, Olga).")
 
 archivo_predecir = st.file_uploader("2. Sube Nuevas Encuestas", type=["csv", "xlsx"], key="pred")
 
@@ -159,13 +168,13 @@ if archivo_predecir and 'modelos' in st.session_state:
     
     if df_new is not None:
         if st.button("Procesar y Tipificar 🚀"):
-            st.info(f"Comentarios originales: {len(df_new)}")
+            st.info(f"Comentarios: {len(df_new)}")
             
-            # 1. SEPARAR POR GUIONES
+            # 1. Separar
             df_exp = procesar_separacion_guiones(df_new, 'Comentario')
-            st.info(f"Filas resultantes tras separar: {len(df_exp)}")
+            st.info(f"Filas generadas: {len(df_exp)}")
             
-            # 2. PREDECIR TIPIFICACIÓN
+            # 2. Predecir
             txt = df_exp['Comentario'].apply(limpiar_texto_simple)
             modelos = st.session_state['modelos']
             
@@ -173,18 +182,18 @@ if archivo_predecir and 'modelos' in st.session_state:
             df_exp['Pred_Tipo'] = modelos['Tipo'].predict(txt)
             df_exp['Pred_Sentimiento'] = modelos['Sentimiento'].predict(txt)
             
-            # 3. DETECTAR NOMBRES (VALIDACIÓN)
-            with st.spinner('Buscando nombres de personas...'):
-                df_exp['Validación_Nombre'] = df_exp['Comentario'].apply(verificar_nombres)
+            # 3. Detectar Nombres (LÓGICA)
+            with st.spinner('Analizando nombres...'):
+                df_exp['Validación_Nombre'] = df_exp['Comentario'].apply(verificar_nombres_logica)
             
-            # 4. MOSTRAR Y DESCARGAR
+            # 4. Resultado
             st.dataframe(df_exp.head(10))
             
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 df_exp.to_excel(writer, index=False)
             
-            st.download_button("Descargar Excel Final", buffer.getvalue(), "Tipificacion_Final.xlsx", "application/vnd.ms-excel")
+            st.download_button("Descargar Excel", buffer.getvalue(), "Tipificacion_Final.xlsx", "application/vnd.ms-excel")
 
 elif archivo_predecir and 'modelos' not in st.session_state:
-    st.warning("⚠️ Primero entrena el modelo en el menú de la izquierda.")
+    st.warning("⚠️ Entrena el modelo primero.")
